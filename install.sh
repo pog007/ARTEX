@@ -61,9 +61,23 @@ install_local(){
     2)
       ensure_docker
       local pw; pw="$(ask 'Postgres password (press Enter for random)' "$(rand)")"
-      docker run -d --name artex-pg -p 5432:5432 \
-        -e POSTGRES_USER=artex -e POSTGRES_PASSWORD="$pw" -e POSTGRES_DB=artex \
-        -v artex-pg:/var/lib/postgresql/data postgres:16-alpine
+      if docker ps -a --format '{{.Names}}' | grep -qx artex-pg; then
+        info "reusing existing artex-pg container"
+        docker start artex-pg >/dev/null
+      else
+        docker run -d --name artex-pg -p 5432:5432 \
+          -e POSTGRES_USER=artex -e POSTGRES_PASSWORD="$pw" -e POSTGRES_DB=artex \
+          -v artex-pg:/var/lib/postgresql/data postgres:16-alpine
+      fi
+      # POSTGRES_PASSWORD only applies to an empty volume; force the chosen password
+      # so config.json matches even when the artex-pg volume is reused
+      info "waiting for PostgreSQL..."
+      for _ in $(seq 1 30); do
+        docker exec artex-pg pg_isready -h 127.0.0.1 -U artex -d artex >/dev/null 2>&1 && break
+        sleep 1
+      done
+      docker exec -i artex-pg psql -q -U artex -d artex -v ON_ERROR_STOP=1 -v pw="$pw" \
+        <<<"ALTER USER artex PASSWORD :'pw';" || die "failed to set the artex password"
       DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=artex DB_PASS="$pw" DB_NAME=artex DB_SSL=disable ;;
     *)
       DB_HOST="$(ask 'Database host' 127.0.0.1)"
@@ -97,7 +111,7 @@ JSON
   if command -v npm >/dev/null 2>&1; then
     info "building frontend static assets..."
     ( cd web && npm ci && npm run build:static )
-    rm -rf server/webui/dist && cp -r web/out server/webui/dist
+    rm -rf server/webui/dist && mkdir -p server/webui && cp -r web/out server/webui/dist
     info "compiling embedded single binary..."
     CGO_ENABLED=0 go build -tags embedui -trimpath -o artex ./cmd/artex
   else
