@@ -109,6 +109,8 @@ JSON
 
   # embedding the frontend requires node to produce the static assets
   if command -v npm >/dev/null 2>&1; then
+    node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>20||(a===20&&b>=9)?0:1)' \
+      || die "Node $(node -v) detected; Next.js needs Node >= 20.9 (nvm: nvm install 22 && nvm use 22)"
     info "building frontend static assets..."
     ( cd web && npm ci && npm run build:static )
     rm -rf server/webui/dist && mkdir -p server/webui && cp -r web/out server/webui/dist
